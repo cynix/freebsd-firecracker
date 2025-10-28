@@ -59,7 +59,6 @@ WITHOUT_NLS=YES
 WITHOUT_NTP=YES
 WITHOUT_OFED=YES
 WITHOUT_OPENMP=YES
-WITHOUT_PF=YES
 WITHOUT_PMC=YES
 WITHOUT_PPP=YES
 WITHOUT_QUOTAS=YES
@@ -76,7 +75,6 @@ WITHOUT_TESTS=YES
 WITHOUT_TFTP=YES
 WITHOUT_WIRELESS=YES
 WITHOUT_WPA_SUPPLICANT_EAPOL=YES
-WITHOUT_ZFS=YES
 END
 
 cat <<'END' > /usr/src/release/Makefile.firecracker
@@ -115,35 +113,21 @@ WITHOUT_FC_FEATURES=WITHOUT_DEBUG_FILES=YES WITHOUT_INCLUDES=YES \
 		WITHOUT_MAILWRAPPER=YES WITHOUT_MAKE=YES WITHOUT_MAN=YES \
 		WITHOUT_MANCOMPRESS=YES WITHOUT_MAN_UTILS=YES WITHOUT_MLX5TOOL=YES \
 		WITHOUT_NETGRAPH=YES WITHOUT_NETLINK=YES WITHOUT_NLS=YES WITHOUT_NTP=YES \
-		WITHOUT_OFED=YES WITHOUT_OPENMP=YES WITHOUT_PF=YES WITHOUT_PMC=YES \
+		WITHOUT_OFED=YES WITHOUT_OPENMP=YES WITHOUT_PMC=YES \
 		WITHOUT_PPP=YES WITHOUT_QUOTAS=YES WITHOUT_RADIUS_SUPPORT=YES \
 		WITHOUT_RBOOTD=YES WITHOUT_ROUTED=YES WITHOUT_SENDMAIL=YES \
 		WITHOUT_SERVICESDB=YES WITHOUT_SHAREDOCS=YES WITHOUT_STATS=YES \
 		WITHOUT_SYSTEM_COMPILER=YES WITHOUT_TALK=YES WITHOUT_TESTS=YES \
-		WITHOUT_TFTP=YES WITHOUT_WIRELESS=YES WITHOUT_WPA_SUPPLICANT_EAPOL=YES \
-		WITHOUT_ZFS=YES
+		WITHOUT_TFTP=YES WITHOUT_WIRELESS=YES WITHOUT_WPA_SUPPLICANT_EAPOL=YES
 # All the excluded bits
 WITHOUTS?=${WITHOUT_VM_ENOENT} ${WITHOUT_FC_ENOENT} ${WITHOUT_FC_FEATURES}
 
-firecracker:	firecracker-freebsd-kern.bin firecracker-freebsd-rootfs.bin
-
-FCKDIR=	${.OBJDIR}/${TARGET}/firecracker-kern
-firecracker-freebsd-kern.bin:
-.if !defined(DESTDIR) || !exists(${DESTDIR})
-	@echo "--------------------------------------------------------------"
-	@echo ">>> DESTDIR must point to destination for Firecracker binaries"
-	@echo "--------------------------------------------------------------"
-	@false
-.endif
-	mkdir -p ${FCKDIR}
-	${MAKE} -C ${WORLDDIR} DESTDIR=${FCKDIR} \
-	    KERNCONF=FIRECRACKER TARGET=${TARGET} installkernel
-	cp ${FCKDIR}/boot/kernel/kernel ${DESTDIR}/freebsd-kern.bin
-
 FCWDIR=	${.OBJDIR}/${TARGET}/firecracker-world
 FCROOTFSSZ?=	1g
-firecracker-freebsd-rootfs.bin:
+firecracker:
 	mkdir -p ${FCWDIR}
+	${MAKE} -C ${WORLDDIR} DESTDIR=${FCWDIR} \
+	    KERNCONF=FIRECRACKER TARGET=${TARGET} installkernel
 	${MAKE} -C ${WORLDDIR} DESTDIR=${FCWDIR} \
 	    ${WITHOUTS} TARGET=${TARGET} installworld distribution distrib-dirs
 	echo '/dev/ufs/rootfs / ufs rw 1 1' > ${FCWDIR}/etc/fstab
@@ -161,6 +145,7 @@ firecracker-freebsd-rootfs.bin:
 	    -u 1001 -g 1001 -G 0 -c "FreeBSD User" -d /home/freebsd -s /bin/sh
 	pw -R ${FCWDIR} usermod root -w yes
 	touch ${FCWDIR}/firstboot
+	mv ${FCWDIR}/boot/kernel/kernel ${DESTDIR}/freebsd-kern.bin
 	makefs -s ${FCROOTFSSZ} -o label=rootfs -o version=2 -o softupdates=1 \
 	    ${DESTDIR}/freebsd-rootfs.bin ${FCWDIR}
 END
