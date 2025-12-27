@@ -18,12 +18,13 @@ Vagrant.configure("2") do |config|
     config.vm.provision "shell", inline: <<~SHELL
       set -e
 
-      pkg install -y git sudo llvm18
+      pkg install -y git sudo llvm19 pcre2
 
       echo 'vagrant ALL=(ALL) NOPASSWD: ALL' > /usr/local/etc/sudoers.d/vagrant
       pw groupmod wheel -m vagrant
 
-      git clone --depth 1 --branch releng/14.3 https://github.com/freebsd/freebsd-src.git /usr/src
+      # The branch here is actually a tag
+      git clone --depth 1 --branch release/15.0.0-p1 https://github.com/freebsd/freebsd-src.git /usr/src
 
       cd /usr/src
       patch < /vagrant/freebsd-amd-tsc-init.patch
