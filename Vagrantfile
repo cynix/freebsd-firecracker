@@ -23,8 +23,7 @@ Vagrant.configure("2") do |config|
       echo 'vagrant ALL=(ALL) NOPASSWD: ALL' > /usr/local/etc/sudoers.d/vagrant
       pw groupmod wheel -m vagrant
 
-      # The branch here is actually a tag
-      git clone --depth 1 --branch release/15.0.0-p1 https://github.com/freebsd/freebsd-src.git /usr/src
+      git clone --depth 1 --branch releng/15.0 https://github.com/freebsd/freebsd-src.git /usr/src
 
       cd /usr/src
       patch < /vagrant/freebsd-amd-tsc-init.patch
