@@ -1,0 +1,231 @@
+name: FreeBSD Firecracker VM
+author: Adam Jensen (@acj)
+description: Launch a FreeBSD VM in Firecracker and run a script inside it
+
+inputs:
+  kernel-url:
+    type: string
+    required: false
+    default: ""
+  rootfs-url:
+    type: string
+    required: false
+    default: ""
+  firecracker-url:
+    type: string
+    required: false
+    default: ""
+  ssh-public-key-url:
+    type: string
+    required: false
+    default: ""
+  ssh-private-key-url:
+    type: string
+    required: false
+    default: ""
+  disk-size:
+    required: false
+    type: string
+    default: "20G"
+
+runs:
+  using: "composite"
+
+  steps:
+    - name: Print diagnostic info
+      shell: bash
+      if: runner.debug
+      run: |
+        echo "::group::CPU info"
+        cat /proc/cpuinfo
+        echo "::endgroup::"
+
+        echo "::group::Memory info"
+        cat /proc/meminfo
+        echo "::endgroup::"
+
+        echo "::group::Kernel version"
+        uname -a
+        echo "::endgroup::"
+
+        echo "::group::Kernel command line"
+        cat /proc/cmdline
+        echo "::endgroup::"
+
+        echo "::group::Network interfaces"
+        ip addr show
+        echo "::endgroup::"
+
+    - name: Start Firecracker VM
+      shell: sudo -E bash -e {0}
+      env:
+        INPUT_KERNEL_URL: ${{ inputs.kernel-url || format('https://github.com/cynix/freebsd-firecracker/releases/download/{0}/freebsd-kern.bin', github.action_ref) }}
+        INPUT_ROOTFS_URL: ${{ inputs.rootfs-url || format('https://github.com/cynix/freebsd-firecracker/releases/download/{0}/freebsd-rootfs.bin.xz', github.action_ref) }}
+        INPUT_FIRECRACKER_URL: ${{ inputs.firecracker-url || format('https://github.com/cynix/freebsd-firecracker/releases/download/{0}/firecracker', github.action_ref) }}
+        INPUT_SSH_PUBLIC_KEY_URL: ${{ inputs.ssh-public-key-url || format('https://github.com/cynix/freebsd-firecracker/releases/download/{0}/freebsd.id_rsa.pub', github.action_ref) }}
+        INPUT_SSH_PRIVATE_KEY_URL: ${{ inputs.ssh-private-key-url || format('https://github.com/cynix/freebsd-firecracker/releases/download/{0}/freebsd.id_rsa', github.action_ref) }}
+        INPUT_DISK_SIZE: ${{ inputs.disk-size }}
+      run: |
+        echo "::group::Installing sshfs"
+        apt-get install -y sshfs
+        mkdir /mnt/firecracker
+        install -d -o "$SUDO_USER" -m 755 /mnt/firecracker
+        echo "::endgroup::"
+
+        tmp="$(mktemp -d)"
+
+        echo "Downloading artifacts"
+        curl -fsSL -o "$tmp/kernel.bin" "$INPUT_KERNEL_URL"
+        curl -fsSL -o "$tmp/rootfs.bin.xz" "$INPUT_ROOTFS_URL"
+        curl -fsSL -o "$tmp/firecracker" "$INPUT_FIRECRACKER_URL"
+        curl -fsSL -o "$tmp/freebsd.id_rsa.pub" "$INPUT_SSH_PUBLIC_KEY_URL"
+        curl -fsSL -o "$tmp/freebsd.id_rsa" "$INPUT_SSH_PRIVATE_KEY_URL"
+
+        echo "Extracting rootfs"
+        xz -T 0 -d "$tmp/rootfs.bin.xz"
+        truncate -s "$INPUT_DISK_SIZE" "$tmp/rootfs.bin"
+
+        chmod +x "$tmp/firecracker"
+
+        install -D -o "$SUDO_USER" -m 600 -T "$tmp/freebsd.id_rsa" /etc/ssh/freebsd.id_rsa
+
+        cat <<EOF > /etc/ssh/ssh_config.d/firecracker.conf
+        Host firecracker
+          Hostname 172.16.0.2
+          User root
+          StrictHostKeyChecking no
+          UserKnownHostsFile /dev/null
+          IdentityFile /etc/ssh/freebsd.id_rsa
+        EOF
+
+        setfacl -m "u:$SUDO_USER:rw" /dev/kvm
+
+        INET_DEV="eth0"
+        TAP_DEV="tap0"
+        TAP_IP="172.16.0.1"
+        MASK_SHORT="/24"
+
+        # Setup network interface
+        ip link del "$TAP_DEV" 2> /dev/null || true
+        ip tuntap add dev "$TAP_DEV" mode tap
+        ip addr add "${TAP_IP}${MASK_SHORT}" dev "$TAP_DEV"
+        ip link set dev "$TAP_DEV" up
+
+        # Enable ip forwarding
+        sysctl net.ipv4.ip_forward=1
+
+        # Set up microVM internet access
+        iptables -t nat -D POSTROUTING -o "$INET_DEV" -j MASQUERADE || true
+        iptables -D FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT || true
+        iptables -D FORWARD -i tap0 -o "$INET_DEV" -j ACCEPT || true
+        iptables -t nat -A POSTROUTING -o "$INET_DEV" -j MASQUERADE
+        iptables -I FORWARD 1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+        iptables -I FORWARD 1 -i tap0 -o "$INET_DEV" -j ACCEPT
+
+        API_SOCKET="/tmp/firecracker.socket"
+        KERNEL_BOOT_ARGS="vfs.root.mountfrom=ufs:/dev/vtbd0"
+
+        # The IP address of a guest is derived from its MAC address with
+        # `fcnet-setup.sh`, this has been pre-configured in the guest rootfs. It is
+        # important that `TAP_IP` and `FC_MAC` match this.
+        FC_MAC="06:00:AC:10:00:02"
+
+        cat <<EOF > /tmp/vmconfig.json
+        {
+          "boot-source": {
+            "kernel_image_path": "$tmp/kernel.bin",
+            "boot_args": "$KERNEL_BOOT_ARGS"
+          },
+          "drives": [
+            {
+              "drive_id": "rootfs",
+              "path_on_host": "$tmp/rootfs.bin",
+              "is_root_device": true,
+              "is_read_only": false
+            }
+          ],
+          "network-interfaces": [
+            {
+              "iface_id": "eth0",
+              "guest_mac": "$FC_MAC",
+              "host_dev_name": "$TAP_DEV"
+            }
+          ],
+          "machine-config": {
+            "vcpu_count": 2,
+            "mem_size_mib": 6144,
+            "smt": false
+          }
+        }
+        EOF
+
+        for vm_start_attempt in {1..3}; do
+          if [ -e "$API_SOCKET" ]; then
+            echo "Removing stale API socket from previous run"
+            rm -f "$API_SOCKET"
+          fi
+
+          LOGFILE="/tmp/firecracker.log"
+          touch "$LOGFILE"
+
+          if [ "${{ runner.debug }}" = true ]; then
+            nohup "$tmp/firecracker" --api-sock "$API_SOCKET" --config-file /tmp/vmconfig.json --log-path "$LOGFILE" &
+          else
+            nohup "$tmp/firecracker" --api-sock "$API_SOCKET" --config-file /tmp/vmconfig.json --log-path "$LOGFILE" > /dev/null 2>&1 &
+          fi
+          firecracker_pid=$!
+
+          vm_started=false
+          for vm_connect_attempt in {1..5}; do
+            if ssh firecracker true; then
+              vm_started=true
+              break
+            fi
+            sleep 1
+          done
+          if [ $vm_started = true ]; then
+            break
+          else
+            echo "Attempt $vm_start_attempt: Firecracker VM did not start, retrying..."
+            kill "$firecracker_pid" || true
+
+            echo "::group::ℹ️ Firecracker VM log (attempt $vm_start_attempt)"
+            cat "$LOGFILE" || true
+            echo "::endgroup::"
+            rm -f "$LOGFILE"
+          fi
+        done
+
+        if [ "$vm_started" = true ]; then
+          echo "✅ Firecracker VM started successfully"
+          echo "firecracker-pid=$firecracker_pid" | tee -a "$GITHUB_STATE" | tee /tmp/firecracker.pid
+        else
+          echo "❌ Failed to start Firecracker VM after multiple attempts. Please report this issue and include the Firecracker VM log below."
+          exit 1
+        fi
+
+    - name: Mount sshfs
+      shell: bash
+      run: |
+        sshfs -o idmap=user firecracker:/ /mnt/firecracker
+
+    - name: "Cleanup Firecracker VM"
+      uses: srz-zumix/post-run-action@v2.3.0
+      with:
+        shell: bash
+        post-run: |
+          if [ -z "$STATE_FIRECRACKER_PID" ]; then
+            STATE_FIRECRACKER_PID=$(cat /tmp/firecracker.pid)
+          fi
+          if [ -z "$STATE_FIRECRACKER_PID" ]; then
+            echo "Firecracker VM did not start"
+            exit 0
+          fi
+
+          fusermount3 -u /mnt/firecracker || true
+          ssh firecracker halt -p || true
+          tail --pid="$STATE_FIRECRACKER_PID" -f /dev/null || true
+
+          echo "::group::ℹ️ Firecracker VM log (please link to this or attach the log contents when reporting a bug in this action)"
+          cat /tmp/firecracker.log
+          echo "::endgroup::"
