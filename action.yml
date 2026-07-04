@@ -67,6 +67,7 @@ runs:
         INPUT_DISK_SIZE: ${{ inputs.disk-size }}
       run: |
         echo "::group::Installing sshfs"
+        apt-get update
         apt-get install -y sshfs
         mkdir /mnt/firecracker
         install -d -o "$SUDO_USER" -m 755 /mnt/firecracker
@@ -223,7 +224,9 @@ runs:
           fi
 
           fusermount3 -u /mnt/firecracker || true
-          ssh firecracker halt -p || true
+
+          # Shut down quickly. See https://man.freebsd.org/cgi/man.cgi?query=halt
+          ssh firecracker reboot || true
           tail --pid="$STATE_FIRECRACKER_PID" -f /dev/null || true
 
           echo "::group::ℹ️ Firecracker VM log (please link to this or attach the log contents when reporting a bug in this action)"

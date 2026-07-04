@@ -2,7 +2,7 @@
 
 set -e
 
-cd /vagrant
+cd /work
 
 cat <<END > /etc/src.conf
 WITHOUT_ACCT=YES
@@ -10,6 +10,7 @@ WITHOUT_ASAN=YES
 WITHOUT_AT=YES
 WITHOUT_AUTHPF=YES
 WITHOUT_BHYVE=YES
+WITHOUT_BOOT=YES
 WITHOUT_BSNMP=YES
 WITHOUT_CALENDAR=YES
 WITHOUT_CDDL=YES
@@ -35,12 +36,16 @@ WITHOUT_GOOGLETEST=YES
 WITHOUT_HAST=YES
 WITHOUT_HTML=YES
 WITHOUT_HYPERV=YES
+WITHOUT_ICONV=YES
+WITHOUT_INCLUDES=YES
 WITHOUT_IPFILTER=YES
 WITHOUT_IPFW=YES
 WITHOUT_IPSEC_SUPPORT=YES
 WITHOUT_ISCI=YES
+WITHOUT_KERBEROS=YES
 WITHOUT_KERNEL_SYMBOLS=YES
 WITHOUT_LDNS=YES
+WITHOUT_LIB32=YES
 WITHOUT_LLDB=YES
 WITHOUT_LOCALES=YES
 WITHOUT_LOCATE=YES
@@ -54,7 +59,6 @@ WITHOUT_MANCOMPRESS=YES
 WITHOUT_MAN_UTILS=YES
 WITHOUT_MLX5TOOL=YES
 WITHOUT_NETGRAPH=YES
-WITHOUT_NETLINK=YES
 WITHOUT_NLS=YES
 WITHOUT_NTP=YES
 WITHOUT_OFED=YES
@@ -63,73 +67,116 @@ WITHOUT_PMC=YES
 WITHOUT_PPP=YES
 WITHOUT_QUOTAS=YES
 WITHOUT_RADIUS_SUPPORT=YES
+WITHOUT_RESCUE=YES
 WITHOUT_RBOOTD=YES
 WITHOUT_ROUTED=YES
 WITHOUT_SENDMAIL=YES
 WITHOUT_SERVICESDB=YES
 WITHOUT_SHAREDOCS=YES
 WITHOUT_STATS=YES
-WITHOUT_SYSTEM_COMPILER=YES
 WITHOUT_TALK=YES
 WITHOUT_TESTS=YES
+WITHOUT_TOOLCHAIN=YES
 WITHOUT_TFTP=YES
 WITHOUT_WIRELESS=YES
 WITHOUT_WPA_SUPPLICANT_EAPOL=YES
 END
 
-cat <<'END' > /usr/src/release/Makefile.firecracker
+cat <<'END' > /work/src/release/Makefile.firecracker
 #
 # Makefile for creating FreeBSD/Firecracker artifacts
 #
 
 CLEANDIRS+=	${TARGET}/firecracker-kern ${TARGET}/firecracker-world
 
-# Bits related to hardware which won't exist in a VM.
-WITHOUT_VM_ENOENT=WITHOUT_APM=YES WITHOUT_BLUETOOTH=YES WITHOUT_CXGBETOOL=YES \
-    WITHOUT_FLOPPY=YES WITHOUT_GPIO=YES WITHOUT_MLX5TOOL=YES WITHOUT_USB=YES \
-    WITHOUT_USB_GADGET_EXAMPLES=YES WITHOUT_VT=YES WITHOUT_WIRELESS=YES
-# Bits related to software which doesn't exist in Firecracker specifically.
-WITHOUT_FC_ENOENT=WITHOUT_ACPI=YES WITHOUT_BOOT=YES WITHOUT_BHYVE=YES \
-    WITHOUT_EFI=YES WITHOUT_FDT=YES WITHOUT_HYPERV=YES \
-    WITHOUT_LEGACY_CONSOLE=YES WITHOUT_SYSCONS=YES
-# Bits which take up a lot of space and probably won't be wanted inside a
-# Firecracker VM.
-WITHOUT_FC_FEATURES=WITHOUT_DEBUG_FILES=YES WITHOUT_INCLUDES=YES \
-		WITHOUT_INSTALLLIB=YES WITHOUT_TESTS=YES WITHOUT_TOOLCHAIN=YES \
-		WITHOUT_ACCT=YES WITHOUT_ASAN=YES WITHOUT_AT=YES WITHOUT_AUTHPF=YES \
-		WITHOUT_BSNMP=YES WITHOUT_CALENDAR=YES WITHOUT_CDDL=YES WITHOUT_CPP=YES \
-		WITHOUT_CLANG=YES WITHOUT_CLANG_EXTRAS=YES \
-		WITHOUT_CROSS_COMPILER=YES WITHOUT_DEBUG_FILES=YES WITHOUT_DIALOG=YES \
-		WITHOUT_DICT=YES WITHOUT_DMAGENT=YES WITHOUT_DTRACE=YES WITHOUT_EE=YES \
-		WITHOUT_EXAMPLES=YES WITHOUT_FINGER=YES WITHOUT_FLOPPY=YES \
-		WITHOUT_FORTH=YES WITHOUT_FREEBSD_UPDATE=YES WITHOUT_FTP=YES \
-		WITHOUT_GAMES=YES WITHOUT_GOOGLETEST=YES WITHOUT_HAST=YES \
-		WITHOUT_HTML=YES WITHOUT_HYPERV=YES WITHOUT_ICONV=YES \
-		WITHOUT_IPFILTER=YES WITHOUT_IPFW=YES WITHOUT_IPSEC_SUPPORT=YES \
-		WITHOUT_ISCI=YES WITHOUT_KERNEL_SYMBOLS=YES \
-		WITHOUT_LDNS=YES WITHOUT_LLDB=YES WITHOUT_LLVM_TARGET_ALL=YES \
-		WITHOUT_LOCALES=YES WITHOUT_LOCATE=YES \
-		WITHOUT_LRP=YES WITHOUT_LS_COLORS=YES WITHOUT_MAIL=YES \
-		WITHOUT_MAILWRAPPER=YES WITHOUT_MAKE=YES WITHOUT_MAN=YES \
-		WITHOUT_MANCOMPRESS=YES WITHOUT_MAN_UTILS=YES WITHOUT_MLX5TOOL=YES \
-		WITHOUT_NETGRAPH=YES WITHOUT_NETLINK=YES WITHOUT_NLS=YES WITHOUT_NTP=YES \
-		WITHOUT_OFED=YES WITHOUT_OPENMP=YES WITHOUT_PMC=YES \
-		WITHOUT_PPP=YES WITHOUT_QUOTAS=YES WITHOUT_RADIUS_SUPPORT=YES \
-		WITHOUT_RBOOTD=YES WITHOUT_ROUTED=YES WITHOUT_SENDMAIL=YES \
-		WITHOUT_SERVICESDB=YES WITHOUT_SHAREDOCS=YES WITHOUT_STATS=YES \
-		WITHOUT_SYSTEM_COMPILER=YES WITHOUT_TALK=YES WITHOUT_TESTS=YES \
-		WITHOUT_TFTP=YES WITHOUT_WIRELESS=YES WITHOUT_WPA_SUPPLICANT_EAPOL=YES
-# All the excluded bits
-WITHOUTS?=${WITHOUT_VM_ENOENT} ${WITHOUT_FC_ENOENT} ${WITHOUT_FC_FEATURES}
+firecracker:	firecracker-freebsd-kern.bin firecracker-freebsd-rootfs.bin
+
+FCKDIR=	${.OBJDIR}/${TARGET}/firecracker-kern
+firecracker-freebsd-kern.bin:
+.if !defined(DESTDIR) || !exists(${DESTDIR})
+	@echo "--------------------------------------------------------------"
+	@echo ">>> DESTDIR must point to destination for Firecracker binaries"
+	@echo "--------------------------------------------------------------"
+	@false
+.endif
+	mkdir -p ${FCKDIR}
+	${MAKE} -C ${WORLDDIR} DESTDIR=${FCKDIR} \
+	    KERNCONF=FIRECRACKER TARGET=${TARGET} installkernel
+	cp ${FCKDIR}/boot/kernel/kernel ${DESTDIR}/freebsd-kern.bin
 
 FCWDIR=	${.OBJDIR}/${TARGET}/firecracker-world
 FCROOTFSSZ?=	1g
-firecracker:
+FREEBSD_VERSION?=	15.1-RELEASE
+FREEBSD_DIST_URL?=	https://download.freebsd.org/releases/${TARGET}/${TARGET_ARCH:U${TARGET}}/${FREEBSD_VERSION}
+firecracker-freebsd-rootfs.bin: firecracker-freebsd-kern.bin
 	mkdir -p ${FCWDIR}
-	${MAKE} -C ${WORLDDIR} DESTDIR=${FCWDIR} \
-	    KERNCONF=FIRECRACKER TARGET=${TARGET} installkernel
-	${MAKE} -C ${WORLDDIR} DESTDIR=${FCWDIR} \
-	    ${WITHOUTS} TARGET=${TARGET} installworld distribution distrib-dirs
+	fetch -o - ${FREEBSD_DIST_URL}/base.txz | tar -C ${FCWDIR} -xpf -
+	# base.txz is the full userland and is larger than the old trimmed
+	# installworld. Drop bits that aren't useful inside a Firecracker CI VM to
+	# keep the image small for the action's download/boot/growfs.
+	rm -rf ${FCWDIR}/usr/tests ${FCWDIR}/usr/share/doc \
+	    ${FCWDIR}/usr/share/examples ${FCWDIR}/usr/share/man \
+	    ${FCWDIR}/usr/share/openssl/man ${FCWDIR}/usr/share/locale \
+	    ${FCWDIR}/usr/share/nls ${FCWDIR}/usr/share/dict \
+	    ${FCWDIR}/usr/lib/debug
+	rm -rf ${FCWDIR}/rescue \
+	    ${FCWDIR}/usr/include \
+	    ${FCWDIR}/usr/lib/clang \
+	    ${FCWDIR}/usr/lib/*.a \
+	    ${FCWDIR}/usr/bin/cc ${FCWDIR}/usr/bin/c++ ${FCWDIR}/usr/bin/cpp \
+	    ${FCWDIR}/usr/bin/clang* ${FCWDIR}/usr/bin/lldb* \
+	    ${FCWDIR}/usr/bin/ld ${FCWDIR}/usr/bin/ld.bfd ${FCWDIR}/usr/bin/ld.lld \
+	    ${FCWDIR}/usr/bin/lld ${FCWDIR}/usr/bin/llvm-*
+	# Drop subsystems the CI guest never uses. None are enabled in the default
+	# rc.conf; DTrace additionally need kernel support the FIRECRACKER
+	# kernel doesn't build (MODULES_OVERRIDE=""), so their userland is inert.
+	# DTrace
+	rm -rf ${FCWDIR}/usr/sbin/dtrace ${FCWDIR}/usr/sbin/lockstat \
+	    ${FCWDIR}/usr/sbin/plockstat ${FCWDIR}/usr/sbin/dwatch \
+	    ${FCWDIR}/usr/lib/dtrace ${FCWDIR}/lib/libdtrace.so* \
+	    ${FCWDIR}/etc/rc.d/dtrace
+	# sendmail MTA
+	rm -rf ${FCWDIR}/usr/libexec/sendmail ${FCWDIR}/usr/share/sendmail \
+	    ${FCWDIR}/etc/rc.d/sendmail
+	# ntpd, ppp, bsnmpd
+	rm -rf ${FCWDIR}/usr/sbin/ntpd ${FCWDIR}/usr/sbin/ntpdc \
+	    ${FCWDIR}/usr/sbin/ntp-keygen ${FCWDIR}/usr/bin/ntpq \
+	    ${FCWDIR}/usr/bin/ntptime ${FCWDIR}/etc/rc.d/ntpd \
+	    ${FCWDIR}/etc/rc.d/ntpdate \
+	    ${FCWDIR}/usr/sbin/ppp ${FCWDIR}/usr/sbin/pppctl \
+	    ${FCWDIR}/usr/sbin/pppoed ${FCWDIR}/etc/rc.d/ppp \
+	    ${FCWDIR}/usr/sbin/bsnmpd ${FCWDIR}/usr/lib/snmp_*.so* \
+	    ${FCWDIR}/usr/bin/bsnmpget ${FCWDIR}/usr/bin/bsnmpwalk \
+	    ${FCWDIR}/etc/rc.d/bsnmpd
+	rm -rf ${FCWDIR}/usr/sbin/bhyve ${FCWDIR}/usr/sbin/bhyvectl \
+	    ${FCWDIR}/usr/sbin/bhyveload ${FCWDIR}/usr/lib/libvmmapi.so*
+	# Firewalls: ipfw, ipfilter (WITHOUT_IPFW, WITHOUT_IPFILTER)
+	rm -rf ${FCWDIR}/usr/sbin/ftp-proxy \
+	    ${FCWDIR}/usr/sbin/authpf* \
+	    ${FCWDIR}/sbin/ipfw ${FCWDIR}/sbin/natd ${FCWDIR}/etc/rc.d/ipfw \
+	    ${FCWDIR}/etc/rc.d/natd \
+	    ${FCWDIR}/sbin/ipf ${FCWDIR}/sbin/ipfstat ${FCWDIR}/sbin/ipmon \
+	    ${FCWDIR}/sbin/ipnat ${FCWDIR}/sbin/ippool ${FCWDIR}/etc/rc.d/ipfilter \
+	    ${FCWDIR}/etc/rc.d/ipnat ${FCWDIR}/etc/rc.d/ipmon
+	# netgraph (WITHOUT_NETGRAPH)
+	rm -rf ${FCWDIR}/usr/sbin/ngctl ${FCWDIR}/usr/sbin/nghook \
+	    ${FCWDIR}/usr/lib/libnetgraph.so* ${FCWDIR}/etc/rc.d/netgraph
+	# mail reader, mailwrapper, dma (WITHOUT_MAIL, WITHOUT_MAILWRAPPER, WITHOUT_DMAGENT)
+	rm -rf ${FCWDIR}/usr/bin/mail ${FCWDIR}/usr/bin/Mail ${FCWDIR}/usr/bin/mailx \
+	    ${FCWDIR}/usr/sbin/mailwrapper ${FCWDIR}/etc/mail/mailer.conf \
+	    ${FCWDIR}/usr/libexec/dma ${FCWDIR}/usr/libexec/dma-mbox-create \
+	    ${FCWDIR}/etc/dma ${FCWDIR}/etc/rc.d/dma
+	# freebsd-update, ftp client, ldns tools (WITHOUT_FREEBSD_UPDATE, WITHOUT_FTP, WITHOUT_LDNS)
+	rm -rf ${FCWDIR}/usr/sbin/freebsd-update ${FCWDIR}/etc/freebsd-update.conf \
+	    ${FCWDIR}/usr/bin/ftp ${FCWDIR}/usr/bin/drill ${FCWDIR}/usr/bin/host
+	# Boot loader: Firecracker loads the kernel directly, so /boot's loader
+	# binaries are never used (WITHOUT_BOOT, WITHOUT_FORTH). Keep /boot itself
+	# and the saved entropy that rc.d/random consumes.
+	rm -rf ${FCWDIR}/boot/loader ${FCWDIR}/boot/loader_* ${FCWDIR}/boot/*.efi \
+	    ${FCWDIR}/boot/lua ${FCWDIR}/boot/defaults ${FCWDIR}/boot/forth \
+	    ${FCWDIR}/boot/dtb ${FCWDIR}/boot/firmware ${FCWDIR}/boot/zfsloader \
+	    ${FCWDIR}/boot/pmbr ${FCWDIR}/boot/*boot ${FCWDIR}/boot/*boot[0-9]* \
+	    ${FCWDIR}/boot/userboot*
 	echo '/dev/ufs/rootfs / ufs rw 1 1' > ${FCWDIR}/etc/fstab
 	echo 'hostname="freebsd"' >> ${FCWDIR}/etc/rc.conf
 	echo 'ifconfig_vtnet0="inet 172.16.0.2 netmask 255.255.255.0"' >> ${FCWDIR}/etc/rc.conf
@@ -145,30 +192,29 @@ firecracker:
 	    -u 1001 -g 1001 -G 0 -c "FreeBSD User" -d /home/freebsd -s /bin/sh
 	pw -R ${FCWDIR} usermod root -w yes
 	touch ${FCWDIR}/firstboot
-	mv ${FCWDIR}/boot/kernel/kernel ${DESTDIR}/freebsd-kern.bin
+  # Copy kernel modules
+	mkdir -p ${FCWDIR}/boot/kernel
+	cp -a ${FCKDIR}/boot/kernel/*.ko ${FCWDIR}/boot/kernel/
 	makefs -s ${FCROOTFSSZ} -o label=rootfs -o version=2 -o softupdates=1 \
 	    ${DESTDIR}/freebsd-rootfs.bin ${FCWDIR}
 END
 
 # Without this, we end up at the mountroot prompt when booting the VM
-cat <<END >> /usr/src/sys/amd64/conf/FIRECRACKER
+cat <<END >> /work/src/sys/amd64/conf/FIRECRACKER
 options ROOTDEVNAME=\"ufs:/dev/vtbd0\"
 END
 
-export LLVM_VERSION="19"
-export LLVM_BIN_DIR="/usr/local/llvm${LLVM_VERSION}/bin"
-export CC="${LLVM_BIN_DIR}/clang"
-export CXX="${LLVM_BIN_DIR}/clang++"
-export CPP="${LLVM_BIN_DIR}/clang-cpp"
-export LD="${LLVM_BIN_DIR}/ld.lld"
-export PATH="/usr/local/llvm${LLVM_VERSION}/bin:$PATH"
+# Skip building kernel modules that we won't use
+cat <<END >> /work/src/sys/amd64/conf/FIRECRACKER
+makeoptions MODULES_OVERRIDE="bridgestp fdescfs if_bridge if_epair linprocfs linsysfs linux_common linux64 mqueue netlink nullfs pf tmpfs zfs"
+END
 
-make -j$(sysctl -n hw.ncpu) -C /usr/src kernel-toolchain KERNCONF=FIRECRACKER
+# Disable debug options
+cat <<END >> /work/src/sys/amd64/conf/FIRECRACKER
+nomakeoptions DEBUG
+nomakeoptions WITH_CTF
+END
 
-make -j$(sysctl -n hw.ncpu) -C /usr/src buildkernel KERNCONF=FIRECRACKER
+make -j$(($(sysctl -n hw.ncpu) + 2)) -C /work/src buildkernel KERNCONF=FIRECRACKER
 
-make -j$(sysctl -n hw.ncpu) -C /usr/src buildworld KERNCONF=FIRECRACKER
-
-make -C /usr/src/release firecracker DESTDIR=$(pwd)
-
-chown -R vagrant:vagrant $(pwd)
+make -C /work/src/release firecracker DESTDIR=$(pwd) FREEBSD_VERSION="${FREEBSD_VERSION}"
