@@ -6,4 +6,4 @@ Forked from:
 Differences:
 
 * Supports running Podman containers inside the VM.
-* The GitHub Action simply starts a VM instance for you to use.
+* The GitHub Action simply starts a VM instance with SSH access and leaves it running.
