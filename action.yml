@@ -61,7 +61,7 @@ runs:
         echo "::endgroup::"
 
     - name: Start Firecracker VM
-      shell: sudo -E bash -e {0}
+      shell: sudo --preserve-env=GITHUB_STATE,INPUT_KERNEL_URL,INPUT_ROOTFS_URL,INPUT_FIRECRACKER_URL,INPUT_SSH_PUBLIC_KEY_URL,INPUT_SSH_PRIVATE_KEY_URL,INPUT_DISK_SIZE bash -e {0}
       env:
         INPUT_KERNEL_URL: ${{ inputs.kernel-url || format('https://github.com/cynix/freebsd-firecracker/releases/download/{0}/freebsd-kern.bin', github.action_ref) }}
         INPUT_ROOTFS_URL: ${{ inputs.rootfs-url || format('https://github.com/cynix/freebsd-firecracker/releases/download/{0}/freebsd-rootfs.bin.xz', github.action_ref) }}
